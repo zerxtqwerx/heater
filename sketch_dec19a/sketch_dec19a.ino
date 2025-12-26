@@ -59,11 +59,16 @@ bool heaterEnabled = false;
 bool systemOn = true;
 int heaterPower = 0;
 
+// Переменные для батареи
+float batteryVoltage = 3.7;
+int batteryPercentage = 83;  // ДОБАВЛЕНО: инициализация переменной
+
 // Тайминги
 unsigned long lastTempUpdate = 0;
 unsigned long lastDisplayUpdate = 0;
 unsigned long lastButtonCheck = 0;
 unsigned long lastButtonPress = 0;
+unsigned long lastBatteryCheck = 0;  // ДОБАВЛЕНО
 
 // =================== ФУНКЦИЯ НАСТРОЙКИ ===================
 void setup() {
@@ -75,6 +80,7 @@ void setup() {
   pinMode(BUTTON_UP, INPUT_PULLUP);
   pinMode(BUTTON_DOWN, INPUT_PULLUP);
   pinMode(HEATER_PIN, OUTPUT);
+  pinMode(BATTERY_PIN, INPUT);  // ДОБАВЛЕНО
   digitalWrite(HEATER_PIN, LOW);
   
   // Настройка ШИМ для MOSFET
@@ -131,7 +137,13 @@ void loop() {
     lastDisplayUpdate = currentTime;
   }
   
-  // 5. ПРОВЕРКА БЕЗОПАСНОСТИ
+  // 5. ОБНОВЛЕНИЕ СОСТОЯНИЯ БАТАРЕИ (ДОБАВЛЕНО)
+  if (currentTime - lastBatteryCheck >= 2000) {
+    updateBatteryStatus();
+    lastBatteryCheck = currentTime;
+  }
+  
+  // 6. ПРОВЕРКА БЕЗОПАСНОСТИ
   safetyCheck();
 }
 
@@ -144,6 +156,24 @@ void updateTemperature() {
     currentTemp = 0.0;
     heaterEnabled = false;
   }
+}
+
+// =================== ФУНКЦИЯ: ОБНОВЛЕНИЕ СОСТОЯНИЯ БАТАРЕИ (ДОБАВЛЕНО) ===================
+void updateBatteryStatus() {
+  // Чтение напряжения батареи (ESP32: 12-битный АЦП, 0-3.3В)
+  int rawValue = analogRead(BATTERY_PIN);
+  batteryVoltage = rawValue * 3.3 / 4095.0 * 2; // Делитель напряжения 1:1
+  
+  // Преобразование в проценты (примерно для Li-ion 3.0-4.2В)
+  batteryPercentage = map(constrain(batteryVoltage, 3.0, 4.2), 3.0, 4.2, 0, 100);
+  batteryPercentage = constrain(batteryPercentage, 0, 100);
+  
+  // Отладка
+  Serial.print("Батарея: ");
+  Serial.print(batteryVoltage);
+  Serial.print("V, ");
+  Serial.print(batteryPercentage);
+  Serial.println("%");
 }
 
 // =================== ФУНКЦИЯ: УПРАВЛЕНИЕ НАГРЕВАТЕЛЕМ ===================
@@ -222,110 +252,203 @@ void handleButtons() {
 void updateDisplay() {
   u8g2.clearBuffer();
   
-  // Температура (крупный шрифт слева)
-  u8g2.setFont(u8g2_font_logisoso32_tn);
-  char currentTempStr[10];
-  dtostrf(currentTemp, 4, 1, currentTempStr);
+  // Устанавливаем черный фон
+  u8g2.setDrawColor(0);
+  u8g2.drawBox(0, 0, 128, 64);
+  u8g2.setDrawColor(1);
   
-  // Вывод текущей температуры (сдвинуто влево для баланса)
-  u8g2.drawStr(-15, 40, currentTempStr);
+  // 1. "STANDBY" - верхний центр, отступ 5px сверху
+  u8g2.setFont(u8g2_font_micro_tr);
+  u8g2.drawStr(5, 7, "STANDBY");
   
-  // Знак Цельсия
-  u8g2.setFont(u8g2_font_helvB18_tr);
-  u8g2.drawStr(60, 40, "C");  // Просто "C" без двоеточия
+  // ========== ТЕМПЕРАТУРЫ ==========
   
-  // Максимальная температура (маленький шрифт рядом)
-  u8g2.setFont(u8g2_font_helvB12_tr);
-  u8g2.drawStr(85, 40, "/");
+  // 2. Текущая температура (крупная, 28pt) - динамическое позиционирование
+  u8g2.setFont(u8g2_font_logisoso28_tn);
   
-  char maxTempStr[5];
-  dtostrf(MAX_TEMPERATURE, 2, 0, maxTempStr);
-  u8g2.drawStr(95, 40, maxTempStr);
+  // Форматируем текущую температуру
+  char tempDisplay[5];
+  sprintf(tempDisplay, "%d", (int)currentTemp);
+  int tempWidth = u8g2.getStrWidth(tempDisplay);
   
-  u8g2.setFont(u8g2_font_helvB10_tr);
-  u8g2.drawStr(115, 40, "C");  // Просто "C" без двоеточия
+  // Рассчитываем позицию текущей температуры левее центра
+  int tempX = (128 - tempWidth) / 2 - 15; // Как было: смещение на 15px левее от центра
+  int tempY = 45;
   
-  // Батарейка в правом верхнем углу
-  drawBattery(100, 5);
+  // Рисуем текущую температуру
+  u8g2.drawStr(tempX, tempY, tempDisplay);
   
-  // Мощность нагрева под батарейкой
-  u8g2.setFont(u8g2_font_5x7_tr);
-  char powerStr[10];
-  sprintf(powerStr, "%d%%", heaterPower);
-  u8g2.drawStr(85, 13, powerStr);
+  // Кружок градуса для текущей температуры
+  drawTinyDegree(tempX + tempWidth + 3, tempY - 28);
   
-  // Огонек или снежинка в левом нижнем углу
-  if (systemOn) { //heaterEnabled 
-    drawFire(5, 47);  // НОВЫЙ огонек при нагреве
-  } else {
-    drawSnowflake(5, 50);  // Снежинка когда выключено
+  // 9. Значок нагрева или снежинки справа от текущей температуры
+  int symbolX = tempX + tempWidth + 15; // 15px правее температуры
+  
+  if (systemOn) { //heaterEnabled && 
+    // Нагрев активен - показываем 3 кривые полоски (печка)
+    drawHeatingSymbol(symbolX, tempY + 10);
+  } else if (!systemOn) { //&& !heaterEnabled
+    // Система включена, но нагрев не активен - показываем снежинку (охлаждение)
+    drawSnowflakeSymbol(symbolX, tempY + 10);
   }
+  // Если systemOn = false - ничего не показываем
+  
+  // 3. Стрелка от текущей температуры к 80
+  int arrowStartX = tempX + tempWidth + 10; // Начало стрелки (10px правее температуры)
+  int arrowEndX = 85; // Конец стрелки (как было: левее "80")
+  int arrowY = tempY - 10; // Стрелка выше температуры
+  
+  // Линия стрелки
+  u8g2.drawLine(arrowStartX, arrowY, arrowEndX, arrowY);
+  
+  // Наконечник стрелки (треугольник)
+  u8g2.drawLine(arrowEndX, arrowY, arrowEndX - 3, arrowY - 2);
+  u8g2.drawLine(arrowEndX, arrowY, arrowEndX - 3, arrowY + 2);
+  
+  // 4. Целевая температура "80" (меньшая, 18pt) - на правой стороне как было
+  u8g2.setFont(u8g2_font_logisoso18_tn);
+  char targetDisplay[5] = "80";
+  int targetWidth = u8g2.getStrWidth(targetDisplay);
+  
+  // Позиция "80" как было: 95 по X, 45 по Y (но смещаем вниз для выравнивания)
+  int targetX = 95; // Как было: фиксированная позиция справа
+  int targetY = tempY; // Выравниваем по базовой линии с крупной температурой
+  
+  u8g2.drawStr(targetX, targetY, targetDisplay);
+  
+  // Кружок градуса для "80"
+  drawTinyDegree(targetX + targetWidth + 3, targetY - 20);
+  
+  // ========== БАТАРЕЯ И ПРОЦЕНТЫ ==========
+  
+  // 5. Рисунок батареи - правый верхний угол
+  drawBattery(105, 3);
+
+  // 6. Процент заряда - с динамическим позиционированием левее батареи
+  u8g2.setFont(u8g2_font_helvB08_tr);
+  char batStr[5];
+  sprintf(batStr, "%d%%", batteryPercentage);
+  int batWidth = u8g2.getStrWidth(batStr);
+  
+  // Позиция процентов: левее батареи
+  int batX = 105 - batWidth - 5;
+  u8g2.drawStr(batX, 12, batStr);
+
+  // 7. "CELSING" - левый нижний угол
+  u8g2.setFont(u8g2_font_micro_tr);
+  u8g2.drawStr(5, 62, "CELSING");
+
+  // 8. "SET" - правый верхний угол, под батареей
+  u8g2.setFont(u8g2_font_micro_tr);
+  u8g2.drawStr(115, 22, "SET");
   
   u8g2.sendBuffer();
 }
 
-// =================== ФУНКЦИЯ: РИСОВАНИЕ НОВОГО ОГОНЬКА ===================
-void drawFire(int x, int y) {
-  // Три чистых языка пламени без искр
+// =================== ФУНКЦИЯ: РИСОВАНИЕ ЗНАЧКА НАГРЕВА (ПЛАМЯ) ===================
+void drawHeatingSymbol(int x, int y) {
+  // Рисуем пламя/огонь - классический символ нагрева
   
-  // Центральный язык (самый высокий)
-  u8g2.drawTriangle(x+5, y,     // Верхняя точка
-                    x+2, y+10,  // Левая нижняя
-                    x+8, y+10); // Правая нижняя
+  // Внешний контур пламени
+  // Левая сторона
+  u8g2.drawLine(x + 4, y, x + 2, y + 2);
+  u8g2.drawLine(x + 2, y + 2, x + 1, y + 5);
+  u8g2.drawLine(x + 1, y + 5, x + 2, y + 8);
   
-  // Левый язык (полевее и чуть ниже)
-  u8g2.drawTriangle(x+2, y+2,   // Верхняя точка
-                    x, y+12,    // Левая нижняя  
-                    x+4, y+12); // Правая нижняя
+  // Правая сторона
+  u8g2.drawLine(x + 4, y, x + 6, y + 2);
+  u8g2.drawLine(x + 6, y + 2, x + 7, y + 5);
+  u8g2.drawLine(x + 7, y + 5, x + 6, y + 8);
   
-  // Правый язык (поправее и чуть ниже)
-  u8g2.drawTriangle(x+8, y+2,   // Верхняя точка
-                    x+6, y+12,  // Левая нижняя
-                    x+10, y+12);// Правая нижняя
+  // Нижняя часть (языки пламени)
+  u8g2.drawLine(x + 2, y + 8, x + 3, y + 6);
+  u8g2.drawLine(x + 3, y + 6, x + 4, y + 8);
+  u8g2.drawLine(x + 4, y + 8, x + 5, y + 6);
+  u8g2.drawLine(x + 5, y + 6, x + 6, y + 8);
   
-  // Две линии для скругления огня снизу
+  // Внутренние языки пламени (для объема)
+  u8g2.drawLine(x + 3, y + 2, x + 4, y + 4);
+  u8g2.drawLine(x + 4, y + 4, x + 5, y + 2);
   
-  // Первая линия - по всей ширине огня (от x до x+10, на высоте y+12)
-  u8g2.drawHLine(x+1, y+12, 9);  // 11 пикселей от x до x+10
-  
-  // Вторая линия - на 2 пикселя короче (от x+1 до x+9, на высоте y+13)
-  u8g2.drawHLine(x+1, y+13, 9);  // 9 пикселей от x+1 до x+9
-  
-  // Третья линия (опционально) - еще короче для эффекта скругления
-  u8g2.drawHLine(x+2, y+14, 7);  // 7 пикселей от x+2 до x+8
+  // Верхняя точка пламени
+  u8g2.drawPixel(x + 4, y - 1);
 }
 
-// =================== ФУНКЦИЯ: РИСОВАНИЕ СНЕЖИНКИ ===================
-void drawSnowflake(int x, int y) {
-  // Центр снежинки
-  int centerX = x + 5;
-  int centerY = y + 5;
+// =================== ФУНКЦИЯ: РИСОВАНИЕ КРАСИВОЙ СНЕЖИНКИ ===================
+void drawSnowflakeSymbol(int x, int y) {
+  // Красивая снежинка с 6 лучами
+  int centerX = x + 4;
+  int centerY = y + 4;
   
-  // Вертикальная и горизонтальная линии
-  u8g2.drawVLine(centerX, centerY-4, 9);
-  u8g2.drawHLine(centerX-4, centerY, 9);
+  // Основные лучи (горизонтальные и вертикальные)
+  u8g2.drawLine(centerX - 4, centerY, centerX - 1, centerY); // Левый
+  u8g2.drawLine(centerX + 1, centerY, centerX + 4, centerY); // Правый
+  u8g2.drawLine(centerX, centerY - 4, centerX, centerY - 1); // Верхний
+  u8g2.drawLine(centerX, centerY + 1, centerX, centerY + 4); // Нижний
   
-  // Диагональные линии
-  u8g2.drawLine(centerX-3, centerY-3, centerX+3, centerY+3);
-  u8g2.drawLine(centerX+3, centerY-3, centerX-3, centerY+3);
+  // Диагональные лучи
+  u8g2.drawLine(centerX - 3, centerY - 3, centerX - 1, centerY - 1); // Левый-верхний
+  u8g2.drawLine(centerX + 3, centerY + 3, centerX + 1, centerY + 1); // Правый-нижний
+  u8g2.drawLine(centerX + 3, centerY - 3, centerX + 1, centerY - 1); // Правый-верхний
+  u8g2.drawLine(centerX - 3, centerY + 3, centerX - 1, centerY + 1); // Левый-нижний
   
-  // Маленькие линии на концах
-  u8g2.drawHLine(centerX-1, centerY-4, 3);
-  u8g2.drawHLine(centerX-1, centerY+4, 3);
-  u8g2.drawVLine(centerX-4, centerY-1, 3);
-  u8g2.drawVLine(centerX+4, centerY-1, 3);
+  // Короткие поперечные линии на концах лучей
+  // Горизонтальные концы
+  u8g2.drawLine(centerX - 4, centerY - 1, centerX - 4, centerY + 1);
+  u8g2.drawLine(centerX + 4, centerY - 1, centerX + 4, centerY + 1);
+  
+  // Вертикальные концы
+  u8g2.drawLine(centerX - 1, centerY - 4, centerX + 1, centerY - 4);
+  u8g2.drawLine(centerX - 1, centerY + 4, centerX + 1, centerY + 4);
+  
+  // Диагональные концы
+  u8g2.drawPixel(centerX - 3, centerY - 2);
+  u8g2.drawPixel(centerX - 2, centerY - 3);
+  u8g2.drawPixel(centerX + 3, centerY + 2);
+  u8g2.drawPixel(centerX + 2, centerY + 3);
+  u8g2.drawPixel(centerX + 3, centerY - 2);
+  u8g2.drawPixel(centerX + 2, centerY - 3);
+  u8g2.drawPixel(centerX - 3, centerY + 2);
+  u8g2.drawPixel(centerX - 2, centerY + 3);
+}
+// =================== ФУНКЦИЯ: РИСОВАНИЕ МАЛЕНЬКОГО КРУЖКА ГРАДУСА ===================
+void drawTinyDegree(int x, int y) {
+  u8g2.drawPixel(x+1, y);
+  u8g2.drawPixel(x+2, y);
+  u8g2.drawPixel(x+3, y);
+  
+  // Нижняя линия
+  u8g2.drawPixel(x+1, y+4);
+  u8g2.drawPixel(x+2, y+4);
+  u8g2.drawPixel(x+3, y+4);
+  
+  // Левая линия
+  u8g2.drawPixel(x, y+1);
+  u8g2.drawPixel(x, y+2);
+  u8g2.drawPixel(x, y+3);
+  
+  // Правая линия
+  u8g2.drawPixel(x+4, y+1);
+  u8g2.drawPixel(x+4, y+2);
+  u8g2.drawPixel(x+4, y+3);
+  
+  // Углы для более круглой формы
+  u8g2.drawPixel(x+1, y+1);
+  u8g2.drawPixel(x+3, y+1);
+  u8g2.drawPixel(x+1, y+3);
+  u8g2.drawPixel(x+3, y+3);
 }
 
-// =================== ФУНКЦИЯ: РИСОВАНИЕ БАТАРЕЙКИ ===================
 void drawBattery(int x, int y) {
   // Контур батарейки
   u8g2.drawFrame(x, y, 20, 10);
-  u8g2.drawBox(x + 20, y + 3, 2, 4);
+  u8g2.drawBox(x + 20, y + 3, 2, 4); // Положительный контакт
   
-  // Уровень заряда (всегда полный для простоты)
-  u8g2.drawBox(x + 2, y + 2, 16, 6);
+  // Уровень заряда в зависимости от процентов
+  int fillWidth = map(batteryPercentage, 0, 100, 0, 18);
+  fillWidth = constrain(fillWidth, 0, 18);
+  u8g2.drawBox(x + 1, y + 1, fillWidth, 8);
 }
-
 // =================== ФУНКЦИЯ: БЕЗОПАСНОСТЬ ===================
 void safetyCheck() {
   if (currentTemp > MAX_TEMPERATURE + 2) {
@@ -345,5 +468,10 @@ void safetyCheck() {
     }
   } else {
     errorCount = 0;
+  }
+  
+  // Проверка напряжения батареи
+  if (batteryPercentage < 10) {
+    Serial.println("ПРЕДУПРЕЖДЕНИЕ: Низкий заряд батареи!");
   }
 }
