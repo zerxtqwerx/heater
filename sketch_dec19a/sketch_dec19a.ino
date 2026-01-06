@@ -1,109 +1,136 @@
-// =================== БИБЛИОТЕКИ ===================
 #include <U8g2lib.h>
 #include <SPI.h>
 #include <max6675.h>
 #include <EEPROM.h>
 
-// =================== ОПРЕДЕЛЕНИЕ ПИНОВ ===================
-#define HEATER_PIN 12      // Пин управления нагревателем
-#define THERMO_CLK 26      // Пин CLK для MAX6675
-#define THERMO_CS  25      // Пин CS для MAX6675
-#define THERMO_DO  33      // Пин DO для MAX6675
-#define BUTTON_POWER 32    // Кнопка POWER (запуск/остановка)
-#define BUTTON_UP    14    // Кнопка UP (увеличение температуры)
-#define BUTTON_DOWN  27    // Кнопка DOWN (уменьшение температуры)
-#define BATTERY_PIN 34     // АЦП для измерения напряжения батареи
-#define OLED_CS     5      // Пин CS для OLED
-#define OLED_DC     2      // Пин DC для OLED
-#define OLED_RST    4      // Пин RST для OLED
+// =================== ПИНЫ ПОДКЛЮЧЕНИЯ ===================
+#define HEATER_PIN 13      // Управление MOSFET нагревателя (D13)
+#define THERMO_CLK 26      // Тактовый пин термопары MAX6675
+#define THERMO_CS  25      // Пин выбора термопары
+#define THERMO_DO  33      // Пин данных термопары
+#define BUTTON_POWER 32    // Главная кнопка (вкл/выкл, режимы)
+#define BUTTON_UP    14    // Кнопка увеличения температуры
+#define BUTTON_DOWN  27    // Кнопка уменьшения температуры
+#define BATTERY_PIN 34     // Измерение напряжения батареи (ADC1_CH6)
+#define OLED_CS     5      // Пин CS OLED дисплея
+#define OLED_DC     2      // Пин DC OLED
+#define OLED_RST    4      // Пин сброса OLED
 
-// =================== НАСТРАИВАЕМЫЕ ПАРАМЕТРЫ ===================
-
-// ПАРАМЕТР ТЕМПЕРАТУРЫ: диапазон 0-30°C, шаг 5°C (для теста)
+// =================== НАСТРОЙКИ ТЕМПЕРАТУРЫ ===================
 #define TEMP_MIN 0         // Минимальная температура (°C)
-#define TEMP_MAX 30        // Максимальная температура (°C) - для теста
-#define TEMP_STEP 5        // Шаг изменения температуры (°C)
-#define DEFAULT_TEMP 30    // Температура по умолчанию (°C)
+#define TEMP_MAX 250       // Максимальная температура (°C)
+#define TEMP_STEP 1        // Шаг изменения температуры кнопками (°C)
+#define DEFAULT_TEMP 200   // Температура по умолчанию (°C)
 
-// ПАРАМЕТРЫ ТАЙМИНГА:
-#define TEMP_UPDATE_INTERVAL 1000      // Интервал опроса датчика (мс) - 1 секунда
-#define DISPLAY_UPDATE_INTERVAL 2000   // Интервал обновления дисплея (мс) - 2 секунды
-#define PWM_CYCLE_TIME 2000           // Время цикла ШИМ (мс) - 2 секунды (50% скважность)
-#define BUTTON_DEBOUNCE 50            // Время антидребезга кнопок (мс)
-#define BUTTON_HOLD_TIME 2000         // Время удержания для включения/выключения (мс) - 2 секунды
-#define DISPLAY_TIMEOUT 60000         // Таймаут дисплея при бездействии (мс) - 1 минута для теста
-#define BUTTON_MULTICLICK_TIMEOUT 800 // Таймаут для многократных нажатий (мс) - 800 мс
-#define BATTERY_UPDATE_INTERVAL 1000  // Обновление батареи каждую секунду
+// =================== ИНТЕРВАЛЫ ВРЕМЕНИ ===================
+#define TEMP_UPDATE_INTERVAL 1000    // Опрос датчика температуры (мс)
+#define DISPLAY_UPDATE_INTERVAL 1000 // Обновление дисплея (мс)
+#define BUTTON_DEBOUNCE 100          // Задержка для подавления дребезга кнопок (мс)
+#define BUTTON_HOLD_TIME 2000        // Удержание для включения/выключения (мс)
+#define DISPLAY_TIMEOUT 5000         // Таймаут отключения дисплея при бездействии (мс)
+#define BATTERY_UPDATE_INTERVAL 5000 // Интервал обновления батареи (мс)
+#define DISPLAY_TARGET_REACHED_TIME 5000 // Время показа температуры после достижения цели
 
-// ПАРАМЕТРЫ НАГРЕВАТЕЛЯ:
-#define HEATER_POWER 100              // Мощность нагревателя (%)
-#define MAX_TEMPERATURE 30.0          // Максимальная температура нагрева (°C)
+// =================== НАСТРОЙКИ НАГРЕВА ===================
+#define MAX_TEMPERATURE 250.0        // Максимальная безопасная температура (°C)
+#define HEATER_POWER_MAX 40          // Максимальная мощность нагрева (%) - УМЕНЬШЕНО!
+#define HEATER_POWER_MAINTAIN 8      // Мощность для поддержания температуры (%) - УМЕНЬШЕНО!
+#define HEATER_POWER_MIN 3           // Минимальная мощность нагрева (%) - УМЕНЬШЕНО!
+#define PWM_FREQUENCY 10             // Частота ШИМ для плавного нагрева (Гц)
+#define PWM_RESOLUTION 8             // Разрешение ШИМ (бит)
+#define PWM_CHANNEL 0                // Канал ШИМ
+#define HEATING_UPDATE_INTERVAL 300  // Интервал обновления мощности нагрева (мс) - УМЕНЬШЕНО!
 
-// ПАРАМЕТРЫ БАТАРЕИ 3S Li-ion:
-#define VOLTAGE_DIVIDER_RATIO 22.28   // Коэффициент делителя напряжения для R1=100к, R2=4.7к
-#define ADC_MAX_VALUE 4095.0          // Максимальное значение АЦП
-#define ADC_REF_VOLTAGE 3.3           // Опорное напряжение АЦП (V)
-#define BATTERY_VOLTAGE_MAX 12.6      // Напряжение полного заряда (V)
-#define BATTERY_VOLTAGE_MIN 9.0       // Напряжение полного разряда (V)
-#define BATTERY_VOLTAGE_LOW 10.5      // Напряжение низкого заряда 25% (V)
-#define BATTERY_VOLTAGE_CRITICAL 9.9  // Напряжение критического заряда (V)
-#define LOW_BATTERY_WARNING_INTERVAL 600000 // Интервал предупреждения о низком заряде (мс) - 10 минут
+// =================== НАСТРОЙКИ БАТАРЕИ ===================
+// ВНИМАНИЕ: ПЕРЕПРОВЕРЬТЕ ЭТИ КОЭФФИЦИЕНТЫ!
+// Если делитель из 4.2В, то скорее всего коэффициент около 2.0-2.5
+// Пример расчета: если делитель 1:2, то коэффициент = 2.0
+// Если используете преобразователь, возможно напряжение уже понижено
+#define VOLTAGE_DIVIDER_COEFF 2.5    // ПЕРЕПРОВЕРЬТЕ ЭТОТ КОЭФФИЦИЕНТ!
+#define ADC_MAX_VALUE 4095.0         // Максимальное значение ADC ESP32
+#define ADC_REF_VOLTAGE 3.3          // Опорное напряжение ADC (В)
+#define BATTERY_FULL_VOLTAGE 4.2     // Напряжение полного заряда (В)
+#define BATTERY_EMPTY_VOLTAGE 3.3    // Напряжение разряженной батареи (В)
+#define BATTERY_LOW_THRESHOLD 25     // Порог низкого заряда (%)
+#define MIN_VOLTAGE_FOR_HEATING 3.50 // Минимальное напряжение для работы нагрева (В)
 
-// ФИЛЬТРАЦИЯ БАТАРЕИ:
-#define FILTER_SAMPLES 20             // Количество выборок для фильтра
-#define BATTERY_SMOOTH_FACTOR 0.1     // Коэффициент сглаживания (0-1)
-
-// ПАРАМЕТРЫ ШИМ:
-#define PWM_FREQUENCY 1000            // Частота ШИМ (Гц)
-#define PWM_RESOLUTION 8              // Разрешение ШИМ (бит)
-
-// =================== ГЛОБАЛЬНЫЕ ОБЪЕКТЫ ===================
+// =================== ИНИЦИАЛИЗАЦИЯ БИБЛИОТЕК ===================
 U8G2_SSD1306_128X64_NONAME_F_4W_HW_SPI u8g2(U8G2_R0, OLED_CS, OLED_DC, OLED_RST);
 MAX6675 thermocouple(THERMO_CLK, THERMO_CS, THERMO_DO);
 
-// =================== ПЕРЕМЕННЫЕ ===================
-float currentTemp = 0.0;              // Текущая температура (°C)
-float desiredTemp = DEFAULT_TEMP;     // Желаемая температура (°C)
-bool heaterEnabled = false;           // Флаг включения нагрева
-bool systemOn = false;                // Флаг включения системы
-bool displayOn = true;                // Флаг включения дисплея
-bool heaterPWMState = false;          // Текущее состояние ШИМ (true = вкл, false = выкл)
+// =================== ПЕРЕМЕННЫЕ СИСТЕМЫ ===================
+float currentTemp = 0.0;           // Текущая температура (°C)
+float desiredTemp = DEFAULT_TEMP;  // Желаемая температура (°C)
+float targetTemp = DEFAULT_TEMP;   // Целевая температура для нагрева (°C)
+bool heaterEnabled = false;        // Флаг включения нагрева
+bool systemOn = false;             // Флаг включения системы
+bool displayOn = false;            // Флаг включения дисплея - ИЗМЕНЕНО: по умолчанию выключен
+bool displayNeedsUpdate = false;   // Флаг необходимости обновления дисплея
 
-// Переменные для батареи
-float batteryVoltage = 0.0;           // Напряжение батареи (V)
-float filteredVoltage = 0.0;          // Отфильтрованное напряжение (V)
-int batteryPercentage = 100;          // Процент заряда батареи (%)
-bool lowBatteryWarning = false;       // Флаг низкого заряда
-bool criticalBattery = false;         // Флаг критического заряда
-unsigned long lastBatteryWarning = 0; // Время последнего предупреждения о низком заряде
-float voltageDividerRatio = VOLTAGE_DIVIDER_RATIO; // Реальный коэффициент делителя
+// Новые флаги для отображения температуры при достижении цели
+bool targetReachedDisplay = false;     // Флаг отображения достижения цели
+unsigned long targetReachedTime = 0;   // Время достижения цели
+bool wasHeating = false;               // Флаг, что нагрев был активен
 
-// Буфер для фильтрации батареи
-float voltageBuffer[FILTER_SAMPLES];
-int bufferIndex = 0;
+// Режимы работы
+enum HeatingMode {
+  MODE_IDLE,        // Ожидание
+  MODE_HEATING,     // Нагрев (🔥)
+  MODE_COOLING,     // Охлаждение (❄️)
+  MODE_MAINTAIN     // Поддержание (=)
+};
 
-// Переменные для кнопок
-int buttonPressCount = 0;             // Счетчик нажатий кнопки POWER
-unsigned long buttonPressTime = 0;    // Время начала нажатия кнопки
-unsigned long lastButtonRelease = 0;  // Время отпускания кнопки для многократных нажатий
+HeatingMode currentMode = MODE_IDLE;
 
-// Переменные для таймингов
-unsigned long lastTempUpdate = 0;     // Время последнего обновления температуры
-unsigned long lastDisplayUpdate = 0;  // Время последнего обновления дисплея
-unsigned long lastButtonCheck = 0;    // Время последней проверки кнопок
-unsigned long lastActivity = 0;       // Время последней активности пользователя
-unsigned long lastPWMCycle = 0;       // Время последнего изменения ШИМ
-unsigned long lastBatteryCheck = 0;   // Время последней проверки батареи
+// Переменные для СУПЕР плавного управления нагревом
+float heatingPower = 0.0;          // Текущая мощность нагрева (%)
+float lastHeatingPower = 0.0;      // Предыдущая мощность нагрева (%)
+unsigned long lastHeatingUpdate = 0; // Время последнего обновления нагрева
+bool overshootDetected = false;    // Флаг обнаружения перегрева
+float overshootAmount = 0.0;       // Величина перегрева
+float heatingIntegral = 0.0;       // Интегральная составляющая для плавности
+float prevTempError = 0.0;         // Предыдущая ошибки температуры
 
-// Флаги для режимов
-bool calibrationMode = false;         // Флаг режима калибровки
+// Фильтр для температуры
+float tempHistory[5] = {0, 0, 0, 0, 0};
+int tempHistoryIndex = 0;
 
-// =================== SETUP ===================
+// =================== ПЕРЕМЕННЫЕ БАТАРЕИ ===================
+float batteryVoltage = 0.0;        // Напряжение батареи (В)
+int batteryPercentage = 100;       // Процент заряда батареи (%)
+unsigned long lastBatteryCheck = 0; // Время последней проверки батареи
+
+// =================== ПЕРЕМЕННЫЕ КНОПОК ===================
+unsigned long buttonPowerPressTime = 0;   // Время нажатия кнопки POWER
+unsigned long buttonPowerReleaseTime = 0; // Время отпускания кнопки POWER
+int buttonPowerClickCount = 0;            // Счетчик кликов кнопки POWER
+bool buttonPowerPressed = false;          // Флаг нажатия кнопки POWER
+bool buttonPowerLongPress = false;        // Флаг длительного нажатия
+bool lastButtonState = HIGH;              // Предыдущее состояние кнопки
+
+// =================== ПЕРЕМЕННЫЕ ВРЕМЕНИ ===================
+unsigned long lastTempUpdate = 0;        // Время последнего обновления температуры
+unsigned long lastDisplayUpdate = 0;     // Время последнего обновления дисплея
+unsigned long lastActivity = 0;          // Время последней активности пользователя
+
 void setup() {
   Serial.begin(115200);
-  Serial.println("========================================");
-  Serial.println("СИСТЕМА НАГРЕВАТЕЛЯ - ИНИЦИАЛИЗАЦИЯ");
-  Serial.println("========================================");
+  
+  // =================== ОТКЛЮЧЕНИЕ Wi-Fi и Bluetooth ===================
+  WiFi.mode(WIFI_OFF);                    // Выключаем Wi-Fi
+  btStop();                               // Выключаем Bluetooth
+  esp_bt_controller_disable();            // Полное отключение контроллера BT
+  
+  // Для ESP32-S3/S2/C3 может потребоваться:
+  // esp_bluedroid_disable();
+  // esp_bt_controller_deinit();
+  
+  Serial.println("Wi-Fi and Bluetooth disabled for power saving");
+  Serial.println("Power saving mode: ACTIVE");
+  // ===================================================================
+  
+  // Остальной код setup()...
+  pinMode(BUTTON_POWER, INPUT_PULLUP);
   
   // Настройка пинов
   pinMode(BUTTON_POWER, INPUT_PULLUP);
@@ -111,110 +138,142 @@ void setup() {
   pinMode(BUTTON_DOWN, INPUT_PULLUP);
   pinMode(HEATER_PIN, OUTPUT);
   pinMode(BATTERY_PIN, INPUT);
-  digitalWrite(HEATER_PIN, LOW);  // Гарантированно выключаем нагреватель
   
-  // Настройка ШИМ для нагревателя
-  ledcAttach(HEATER_PIN, PWM_FREQUENCY, PWM_RESOLUTION);
-  ledcWrite(HEATER_PIN, 0);
+  digitalWrite(HEATER_PIN, LOW);
   
-  // Инициализация OLED дисплея
+  // Настройка ШИМ
+  ledcSetup(PWM_CHANNEL, PWM_FREQUENCY, PWM_RESOLUTION);
+  ledcAttachPin(HEATER_PIN, PWM_CHANNEL);
+  ledcWrite(PWM_CHANNEL, 0);
+  
+  // Инициализация дисплея
   u8g2.begin();
-  Serial.println("OLED дисплей инициализирован");
+  u8g2.clearBuffer();
+  u8g2.sendBuffer();
+  displayOn = false; // ДИСПЛЕЙ ВЫКЛЮЧЕН ПРИ СТАРТЕ
   
-  // Инициализация EEPROM для сохранения настроек
+  // Инициализация EEPROM
   EEPROM.begin(128);
   
-  // Загрузка сохраненной температуры из EEPROM
+  // Загрузка температуры
   loadSavedTemperature();
-  
-  // Загрузка калибровочного коэффициента из EEPROM
-  loadCalibrationData();
-  
-  // Инициализация буфера фильтрации
-  for (int i = 0; i < FILTER_SAMPLES; i++) {
-    voltageBuffer[i] = 0;
-  }
+  targetTemp = desiredTemp;
   
   // Тест термопары
   delay(500);
   float testTemp = thermocouple.readCelsius();
-  if(isnan(testTemp)) {
-    Serial.println("ОШИБКА: Проверьте подключение термопары!");
-    displayErrorMessage("THERMO ERROR");
+  if(isnan(testTemp) || testTemp < -50 || testTemp > 1000) {
+    Serial.println("ERROR: Thermocouple not working!");
+    displayErrorMessage("SENSOR ERROR");
   } else {
     currentTemp = testTemp;
-    Serial.print("Начальная температура: ");
-    Serial.print(currentTemp);
-    Serial.println("°C");
+    for (int i = 0; i < 5; i++) {
+      tempHistory[i] = currentTemp;
+    }
   }
   
-  // Начальное заполнение буфера батареи
-  for (int i = 0; i < FILTER_SAMPLES; i++) {
-    updateBatteryStatus();
-    delay(50);
-  }
+  // Измерение батареи
+  updateBatteryStatus();
   
-  lastActivity = millis();  // Записываем время начала работы
-  
-  Serial.println("\n=== ИНСТРУКЦИЯ ===");
-  Serial.println("1. Удерживайте POWER 2 сек - ВКЛ/ВЫКЛ системы");
-  Serial.println("2. Нажмите POWER 3 раза - ВКЛ/ВЫКЛ нагрева");
-  Serial.println("3. Нажмите POWER 2 раза - ВКЛ/ВЫКЛ дисплея");
-  Serial.println("4. Для калибровки: наберите 'CAL' в мониторе порта");
-  Serial.println("5. Нагрев работает до 30°C (тестовый режим)");
-  Serial.println("6. Батарея: пин 34 (ADC), параболический расчет");
-  Serial.print("7. Коэффициент делителя: ");
-  Serial.println(voltageDividerRatio, 2);
-  Serial.println("========================================");
+  lastActivity = millis();
 }
 
-// =================== LOOP ===================
 void loop() {
   unsigned long currentTime = millis();
   
-  // Проверка команды калибровки из Serial
-  checkSerialCommands();
+  // Обработка кнопки POWER
+  handlePowerButton();
   
-  // Если в режиме калибровки - только калибровка
-  if (calibrationMode) {
-    calibrateVoltageDivider();
-    return;
+  // Обработка кнопок температуры
+  if (systemOn) {
+    handleTemperatureButtons();
   }
   
-  // 1. ОПРОС ТЕРМОПАРЫ - каждую секунду
+  // Обновление температуры
   if (currentTime - lastTempUpdate >= TEMP_UPDATE_INTERVAL) {
     updateTemperature();
+    
+    // Определение режима работы с АДАПТИВНЫМИ ПОРОГАМИ
+    if (heaterEnabled) {
+      float tempDiff = targetTemp - currentTemp;
+      float absTempDiff = abs(tempDiff);
+      
+      // АДАПТИВНЫЕ ПОРОГИ
+      float adaptiveOvershootThreshold = max(3.0f, absTempDiff * 0.05f);
+      float adaptiveMaintainThreshold = max(1.5f, absTempDiff * 0.02f); // Уменьшено до 2%
+      
+      // Проверка на перегрев
+      if (currentTemp > targetTemp + adaptiveOvershootThreshold) {
+        overshootDetected = true;
+        overshootAmount = currentTemp - targetTemp;
+        currentMode = MODE_COOLING;
+        Serial.print("OVERSHOOT! +");
+        Serial.print(overshootAmount, 1);
+        Serial.println("°C");
+      }
+      // Если уже был перегрев
+      else if (overshootDetected) {
+        if (currentTemp <= targetTemp + 0.5f) { // Ждем полного остывания
+          overshootDetected = false;
+          currentMode = MODE_MAINTAIN;
+          Serial.println("Overshoot cleared");
+        } else {
+          currentMode = MODE_COOLING;
+        }
+      }
+      // Нормальная работа
+      else {
+        // Режим поддержания
+        if (absTempDiff <= adaptiveMaintainThreshold) {
+          currentMode = MODE_MAINTAIN;
+          
+          // Если только что достигли цели - включаем отображение на 5 секунд
+          if (wasHeating && !targetReachedDisplay) {
+            targetReachedDisplay = true;
+            targetReachedTime = currentTime;
+            displayOn = true; // ВКЛЮЧАЕМ ДИСПЛЕЙ
+            Serial.println("Target temperature reached! Display ON for 5 sec");
+          }
+        }
+        // Режим нагрева
+        else if (tempDiff > 0) {
+          currentMode = MODE_HEATING;
+          wasHeating = true;
+          targetReachedDisplay = false;
+        }
+        // Режим охлаждения (температура выше цели, но не перегрев)
+        else {
+          currentMode = MODE_COOLING;
+        }
+      }
+    } else {
+      // Нагреватель выключен - режим охлаждения
+      currentMode = MODE_COOLING;
+      overshootDetected = false;
+      wasHeating = false;
+    }
+    
     lastTempUpdate = currentTime;
   }
   
-  // 2. УПРАВЛЕНИЕ НАГРЕВАТЕЛЕМ С ШИМ - скважность 50%
+  // Управление нагревом
   if (systemOn && heaterEnabled) {
-    if (currentTime - lastPWMCycle >= PWM_CYCLE_TIME / 2) {  // Половина цикла
-      controlHeater();
-      lastPWMCycle = currentTime;
-    }
+    controlHeater();
+  } else {
+    ledcWrite(PWM_CHANNEL, 0);
+    heatingPower = 0;
+    lastHeatingPower = 0;
+    overshootDetected = false;
+    // Не меняем currentMode здесь - он уже установлен выше
   }
   
-  // 3. ОБРАБОТКА КНОПОК - с антидребезгом
-  if (currentTime - lastButtonCheck >= BUTTON_DEBOUNCE) {
-    handleButtons();
-    lastButtonCheck = currentTime;
-  }
-  
-  // 4. ПРОВЕРКА БАТАРЕИ - каждую секунду
+  // Обновление батареи
   if (currentTime - lastBatteryCheck >= BATTERY_UPDATE_INTERVAL) {
     updateBatteryStatus();
-    
-    // Проверка низкого заряда каждые 10 минут
-    if (lowBatteryWarning && (currentTime - lastBatteryWarning >= LOW_BATTERY_WARNING_INTERVAL)) {
-      displayLowBatteryWarning();
-      lastBatteryWarning = currentTime;
-    }
-    
     lastBatteryCheck = currentTime;
   }
   
-  // 5. ОБНОВЛЕНИЕ ДИСПЛЕЯ - каждые 2 секунды
+  // Обновление дисплея
   if (displayOn && systemOn) {
     if (currentTime - lastDisplayUpdate >= DISPLAY_UPDATE_INTERVAL) {
       updateDisplay();
@@ -222,555 +281,419 @@ void loop() {
     }
   }
   
-  // 6. ТАЙМАУТ ДИСПЛЕЯ - 1 минута бездействия
-  if (systemOn && displayOn && (currentTime - lastActivity >= DISPLAY_TIMEOUT)) {
+  // Таймаут дисплея (если не достигли цели)
+  if (!targetReachedDisplay && systemOn && displayOn && (currentTime - lastActivity >= DISPLAY_TIMEOUT)) {
     displayOn = false;
     u8g2.clearBuffer();
     u8g2.sendBuffer();
-    Serial.println("Дисплей отключен по таймауту");
+    Serial.println("Display timeout - OFF");
   }
   
-  // 7. ОБРАБОТКА МНОГОКРАТНЫХ НАЖАТИЙ КНОПКИ
-  if (buttonPressCount > 0 && (currentTime - lastButtonRelease >= BUTTON_MULTICLICK_TIMEOUT)) {
-    processButtonMultiClicks();
+  // Таймаут отображения достижения цели
+  if (targetReachedDisplay && (currentTime - targetReachedTime >= DISPLAY_TARGET_REACHED_TIME)) {
+    targetReachedDisplay = false;
+    displayOn = false;
+    u8g2.clearBuffer();
+    u8g2.sendBuffer();
+    Serial.println("Target reached display timeout - OFF");
   }
   
-  // 8. ПРОВЕРКА БЕЗОПАСНОСТИ
+  // Проверки безопасности
   safetyCheck();
 }
 
-// =================== ФУНКЦИЯ: ПРОВЕРКА КОМАНД ИЗ SERIAL ===================
-void checkSerialCommands() {
-  if (Serial.available()) {
-    String command = Serial.readStringUntil('\n');
-    command.trim();
-    
-    if (command == "CAL" || command == "cal") {
-      calibrationMode = true;
-      Serial.println("\n=== ВХОД В РЕЖИМ КАЛИБРОВКИ ===");
-      Serial.println("Отключите нагреватель для безопасности!");
-      heaterEnabled = false;
-      systemOn = false;
-      ledcWrite(HEATER_PIN, 0);
-    }
-    else if (command == "INFO" || command == "info") {
-      printBatteryInfo();
-    }
-    else if (command == "HELP" || command == "help") {
-      printHelp();
+// =================== ОБРАБОТКА КНОПКИ POWER ===================
+void handlePowerButton() {
+  unsigned long currentTime = millis();
+  
+  // Считываем состояние кнопки
+  bool buttonState = digitalRead(BUTTON_POWER);
+  
+  // Обнаружение нажатия (переход из HIGH в LOW)
+  if (buttonState == LOW && lastButtonState == HIGH) {
+    // Защита от дребезга
+    if (currentTime - buttonPowerPressTime > 50) {
+      buttonPowerPressed = true;
+      buttonPowerPressTime = currentTime;
+      lastActivity = currentTime;
     }
   }
-}
-
-// =================== ФУНКЦИЯ: КАЛИБРОВКА ДЕЛИТЕЛЯ НАПРЯЖЕНИЯ ===================
-void calibrateVoltageDivider() {
-  static int calibrationStep = 0;
-  static float realVoltage = 0;
-  static unsigned long calibrationStartTime = 0;
   
-  switch (calibrationStep) {
-    case 0: // Начало калибровки
-      calibrationStartTime = millis();
-      Serial.println("\n=== КАЛИБРОВКА ДЕЛИТЕЛЯ НАПРЯЖЕНИЯ ===");
-      Serial.println("ШАГ 1: Подготовка");
-      Serial.println("1. Подключите мультиметр к батарее");
-      Serial.println("2. Измерьте реальное напряжение батареи");
-      Serial.println("3. Убедитесь, что батарея стабильна");
-      Serial.println("\nНапишите 'NEXT' для продолжения...");
-      calibrationStep = 1;
-      break;
+  // Обнаружение отпускания (переход из LOW в HIGH)
+  if (buttonState == HIGH && lastButtonState == LOW) {
+    if (buttonPowerPressed) {
+      buttonPowerPressed = false;
+      buttonPowerReleaseTime = currentTime;
+      lastActivity = currentTime;
       
-    case 1: // Ожидание команды NEXT
-      if (Serial.available()) {
-        String cmd = Serial.readStringUntil('\n');
-        cmd.trim();
-        if (cmd == "NEXT" || cmd == "next") {
-          Serial.println("\nШАГ 2: Ввод реального напряжения");
-          Serial.println("Введите измеренное напряжение батареи в вольтах");
-          Serial.println("Например: 12.34");
-          Serial.print("> ");
-          calibrationStep = 2;
-        }
-      }
-      break;
+      // Проверяем, было ли это длительное нажатие
+      unsigned long pressDuration = currentTime - buttonPowerPressTime;
       
-    case 2: // Ввод реального напряжения
-      if (Serial.available()) {
-        realVoltage = Serial.parseFloat();
-        Serial.println(realVoltage, 2);
+      // ДЛИТЕЛЬНОЕ НАЖАТИЕ (2 секунды) - вкл/выкл системы
+      if (pressDuration >= BUTTON_HOLD_TIME) {
+        buttonPowerLongPress = true;
         
-        if (realVoltage < 9.0 || realVoltage > 13.0) {
-          Serial.println("ОШИБКА: Напряжение должно быть 9.0V - 13.0V");
-          Serial.println("Повторите ввод:");
-          Serial.print("> ");
+        systemOn = !systemOn;
+        displayOn = systemOn; // Включаем дисплей только если включаем систему
+        lastActivity = currentTime;
+        
+        if (systemOn) {
+          Serial.println("=== SYSTEM ON ===");
+          heaterEnabled = false;
+          currentMode = MODE_IDLE;
+          overshootDetected = false;
+          ledcWrite(PWM_CHANNEL, 0);
+          heatingPower = 0;
+          lastHeatingPower = 0;
+          targetTemp = desiredTemp;
+          wasHeating = false;
+          targetReachedDisplay = false;
         } else {
-          Serial.print("Принято: ");
-          Serial.print(realVoltage, 2);
-          Serial.println("V");
-          
-          Serial.println("\nШАГ 3: Измерение ADC...");
-          
-          // Измеряем ADC 50 раз для усреднения
-          const int numSamples = 50;
-          long sum = 0;
-          for (int i = 0; i < numSamples; i++) {
-            sum += analogRead(BATTERY_PIN);
-            delay(10);
-            if (i % 10 == 0) Serial.print(".");
-          }
-          Serial.println();
-          
-          int rawValue = sum / numSamples;
-          float adcVoltage = (rawValue / ADC_MAX_VALUE) * ADC_REF_VOLTAGE;
-          
-          // Рассчитываем коэффициент делителя
-          voltageDividerRatio = realVoltage / adcVoltage;
-          
-          Serial.println("\n=== РЕЗУЛЬТАТЫ КАЛИБРОВКИ ===");
-          Serial.print("ADC raw значение: ");
-          Serial.println(rawValue);
-          Serial.print("Напряжение на ADC: ");
-          Serial.print(adcVoltage, 4);
-          Serial.println("V");
-          Serial.print("Реальное напряжение батареи: ");
-          Serial.print(realVoltage, 2);
-          Serial.println("V");
-          Serial.print("РАССЧИТАННЫЙ КОЭФФИЦИЕНТ: ");
-          Serial.println(voltageDividerRatio, 4);
-          
-          // Проверка безопасности
-          if (adcVoltage > 3.3) {
-            Serial.println("ВНИМАНИЕ: Напряжение на ADC > 3.3V! Риск повреждения ESP32!");
-          } else if (adcVoltage > 2.5) {
-            Serial.println("ВНИМАНИЕ: Напряжение на ADC > 2.5V! Делитель слишком мал!");
-          } else if (adcVoltage < 0.1) {
-            Serial.println("ВНИМАНИЕ: Напряжение на ADC < 0.1V! Делитель слишком велик!");
-          } else {
-            Serial.println("БЕЗОПАСНО: Напряжение в допустимых пределах");
-          }
-          
-          Serial.println("\nШАГ 4: Сохранение");
-          Serial.println("Введите 'SAVE' для сохранения или 'CANCEL' для отмены");
-          Serial.print("> ");
-          calibrationStep = 3;
-        }
-      }
-      break;
-      
-    case 3: // Сохранение или отмена
-      if (Serial.available()) {
-        String cmd = Serial.readStringUntil('\n');
-        cmd.trim();
-        
-        if (cmd == "SAVE" || cmd == "save") {
-          // Сохраняем в EEPROM
-          EEPROM.put(10, voltageDividerRatio); // Адрес 10 для коэффициента
-          EEPROM.commit();
-          
-          Serial.println("Коэффициент сохранен в EEPROM!");
-          Serial.print("Новый коэффициент: ");
-          Serial.println(voltageDividerRatio, 4);
-          
-          // Тестовое измерение с новым коэффициентом
-          Serial.println("\nТестовое измерение с новым коэффициентом:");
-          updateBatteryStatus();
-          
-        } else if (cmd == "CANCEL" || cmd == "cancel") {
-          Serial.println("Калибровка отменена. Коэффициент не сохранен.");
+          Serial.println("=== SYSTEM OFF ===");
+          heaterEnabled = false;
+          ledcWrite(PWM_CHANNEL, 0);
+          heatingPower = 0;
+          lastHeatingPower = 0;
+          saveTemperatureToEEPROM();
         }
         
-        // Выход из режима калибровки
-        calibrationMode = false;
-        calibrationStep = 0;
-        Serial.println("\n=== ВЫХОД ИЗ РЕЖИМА КАЛИБРОВКИ ===");
-      }
-      break;
-  }
-  
-  // Таймаут калибровки (5 минут)
-  if (calibrationMode && (millis() - calibrationStartTime > 300000)) {
-    calibrationMode = false;
-    calibrationStep = 0;
-    Serial.println("\nТАЙМАУТ: Калибровка прервана по времени");
-  }
-}
-
-// =================== ФУНКЦИЯ: ЗАГРУЗКА КАЛИБРОВОЧНЫХ ДАННЫХ ===================
-void loadCalibrationData() {
-  float savedRatio;
-  EEPROM.get(10, savedRatio);
-  
-  // Проверяем, что значение в разумных пределах
-  if (savedRatio > 10.0 && savedRatio < 100.0) {
-    voltageDividerRatio = savedRatio;
-    Serial.print("Загружен калибровочный коэффициент: ");
-    Serial.println(voltageDividerRatio, 4);
-  } else {
-    Serial.print("Используется коэффициент по умолчанию: ");
-    Serial.println(voltageDividerRatio, 2);
-  }
-}
-
-// =================== ФУНКЦИЯ: ВЫВОД ИНФОРМАЦИИ О БАТАРЕЕ ===================
-void printBatteryInfo() {
-  Serial.println("\n=== ИНФОРМАЦИЯ О БАТАРЕЕ ===");
-  Serial.print("Коэффициент делителя: ");
-  Serial.println(voltageDividerRatio, 4);
-  
-  // Сырые данные ADC
-  int raw = analogRead(BATTERY_PIN);
-  Serial.print("ADC raw (одно измерение): ");
-  Serial.println(raw);
-  
-  // Расчетное напряжение на ADC
-  float adcV = (raw / ADC_MAX_VALUE) * ADC_REF_VOLTAGE;
-  Serial.print("Напряжение на ADC: ");
-  Serial.print(adcV, 4);
-  Serial.println("V");
-  
-  // Расчетное напряжение батареи
-  float calcV = adcV * voltageDividerRatio;
-  Serial.print("Расчетное напряжение батареи: ");
-  Serial.print(calcV, 2);
-  Serial.println("V");
-  
-  // Процент заряда (параболический расчет)
-  int perc = calculateBatteryPercentageNonlinear(calcV);
-  Serial.print("Процент заряда (параболический): ");
-  Serial.print(perc);
-  Serial.println("%");
-  
-  // Безопасность
-  if (adcV > 3.3) {
-    Serial.println("ОПАСНО: Напряжение на ADC > 3.3V!");
-  } else if (adcV > 3.0) {
-    Serial.println("ПРЕДУПРЕЖДЕНИЕ: Напряжение на ADC близко к 3.3V");
-  }
-  
-  Serial.println("==============================");
-}
-
-// =================== ФУНКЦИЯ: ВЫВОД СПРАВКИ ===================
-void printHelp() {
-  Serial.println("\n=== КОМАНДЫ SERIAL ===");
-  Serial.println("CAL    - Калибровка делителя напряжения");
-  Serial.println("INFO   - Информация о батарее");
-  Serial.println("HELP   - Эта справка");
-  Serial.println("\n=== УПРАВЛЕНИЕ КНОПКАМИ ===");
-  Serial.println("Удержание POWER 2 сек - ВКЛ/ВЫКЛ системы");
-  Serial.println("Тройное нажатие POWER - ВКЛ/ВЫКЛ нагрева");
-  Serial.println("Двойное нажатие POWER - ВКЛ/ВЫКЛ дисплея");
-  Serial.println("UP/DOWN - Изменение температуры");
-  Serial.println("==============================");
-}
-
-// =================== ФУНКЦИЯ: ОБНОВЛЕНИЕ ТЕМПЕРАТУРЫ ===================
-void updateTemperature() {
-  float newTemp = thermocouple.readCelsius();
-  
-  if (isnan(newTemp) || newTemp < -50 || newTemp > 400) {
-    Serial.println("ОШИБКА: Неверные показания термопары!");
-    if (heaterEnabled) {
-      heaterEnabled = false;
-      ledcWrite(HEATER_PIN, 0);
-      Serial.println("Нагрев отключен из-за ошибки термопары");
-    }
-    return;
-  }
-  
-  currentTemp = newTemp;
-}
-
-// =================== ФУНКЦИЯ: УПРАВЛЕНИЕ НАГРЕВАТЕЛЕМ ===================
-void controlHeater() {
-  // Если нагрев не включен или система выключена - выключаем
-  if (!systemOn || !heaterEnabled) {
-    ledcWrite(HEATER_PIN, 0);
-    heaterPWMState = false;
-    return;
-  }
-  
-  // Проверка достижения максимальной температуры
-  if (currentTemp >= MAX_TEMPERATURE) {
-    ledcWrite(HEATER_PIN, 0);
-    heaterPWMState = false;
-    heaterEnabled = false;  // Отключаем нагрев при достижении
-    Serial.print("Достигнуто ");
-    Serial.print(MAX_TEMPERATURE);
-    Serial.println("°C! Нагрев отключен.");
-    return;
-  }
-  
-  // Проверка критического уровня батареи
-  if (criticalBattery) {
-    ledcWrite(HEATER_PIN, 0);
-    heaterPWMState = false;
-    heaterEnabled = false;
-    Serial.println("Нагрев отключен: критический уровень батареи!");
-    return;
-  }
-  
-  // ШИМ СКВАЖНОСТЬЮ 50%: переключаем состояние каждую секунду
-  heaterPWMState = !heaterPWMState;
-  
-  if (heaterPWMState) {
-    // Включаем нагреватель на полную мощность
-    int pwmValue = map(HEATER_POWER, 0, 100, 0, 255);
-    ledcWrite(HEATER_PIN, pwmValue);
-  } else {
-    // Выключаем нагреватель
-    ledcWrite(HEATER_PIN, 0);
-  }
-}
-
-// =================== ФУНКЦИЯ: ОБРАБОТКА КНОПОК ===================
-void handleButtons() {
-  // ОБРАБОТКА КНОПКИ POWER
-  if (digitalRead(BUTTON_POWER) == LOW) {
-    if (buttonPressTime == 0) {
-      buttonPressTime = millis();
-      lastActivity = millis();  // Сбрасываем таймер бездействия
-      
-      // Если дисплей выключен - включаем его
-      if (systemOn && !displayOn) {
-        displayOn = true;
         updateDisplay();
-      }
-    }
-    
-    // УДЕРЖАНИЕ 2 СЕКУНДЫ - ВКЛ/ВЫКЛ СИСТЕМЫ
-    if (millis() - buttonPressTime >= BUTTON_HOLD_TIME) {
-      systemOn = !systemOn;
-      displayOn = true;
-      lastActivity = millis();
-      
-      if (systemOn) {
-        Serial.println("=== СИСТЕМА ВКЛЮЧЕНА ===");
-      } else {
-        heaterEnabled = false;
-        ledcWrite(HEATER_PIN, 0);
-        Serial.println("=== СИСТЕМА ВЫКЛЮЧЕНА ===");
-      }
-      updateDisplay();
-      
-      buttonPressTime = 0;
-      delay(300);  // Задержка для предотвращения повторного срабатывания
-      return;
-    }
-  } else {
-    // КНОПКА ОТПУЩЕНА
-    if (buttonPressTime > 0) {
-      unsigned long pressDuration = millis() - buttonPressTime;
-      
-      // КОРОТКОЕ НАЖАТИЕ (менее 500 мс)
-      if (pressDuration < 500 && pressDuration > 50) {
-        buttonPressCount++;
-        lastButtonRelease = millis();
-        Serial.print("Нажатие POWER: ");
-        Serial.println(buttonPressCount);
-        
-        buttonPressTime = 0;
+        delay(300);
+        buttonPowerClickCount = 0;
         return;
       }
       
-      buttonPressTime = 0;
+      // КОРОТКОЕ НАЖАТИЕ
+      else {
+        buttonPowerLongPress = false;
+        
+        // Если дисплей выключен - ВКЛЮЧАЕМ ЕГО
+        if (!displayOn) {
+          displayOn = true;
+          updateDisplay();
+          buttonPowerClickCount = 0; // Сбрасываем счетчик кликов
+          return;
+        }
+        
+        // Если дисплей уже включен - считаем клики
+        buttonPowerClickCount++;
+        
+        // ДВОЙНОЕ НАЖАТИЕ - вкл/выкл нагрева (только если дисплей ВКЛЮЧЕН)
+        if (buttonPowerClickCount == 2 && displayOn) {
+          if (systemOn) {
+            if (!heaterEnabled && (batteryPercentage <= 0 || batteryVoltage < MIN_VOLTAGE_FOR_HEATING)) {
+              updateDisplay();
+              buttonPowerClickCount = 0;
+              return;
+            }
+            
+            heaterEnabled = !heaterEnabled;
+            overshootDetected = false;
+            heatingIntegral = 0.0;
+            prevTempError = 0.0;
+            lastActivity = currentTime;
+            
+            if (heaterEnabled) {
+              Serial.println("=== HEATING ENABLED ===");
+              Serial.print("Target temperature: ");
+              Serial.println(desiredTemp);
+              targetTemp = desiredTemp;
+              heatingPower = HEATER_POWER_MIN;
+              lastHeatingPower = HEATER_POWER_MIN;
+              wasHeating = false;
+              targetReachedDisplay = false;
+              
+              // Включаем дисплей при старте нагрева
+              displayOn = true;
+            } else {
+              Serial.println("=== HEATING DISABLED ===");
+              ledcWrite(PWM_CHANNEL, 0);
+              heatingPower = 0;
+              lastHeatingPower = 0;
+              currentMode = MODE_IDLE;
+              wasHeating = false;
+            }
+            
+            updateDisplay();
+          }
+          buttonPowerClickCount = 0;
+        }
+      }
     }
   }
   
-  // ОБРАБОТКА КНОПОК UP/DOWN (только при включенной системе)
-  if (systemOn) {
-    // КНОПКА UP - УВЕЛИЧЕНИЕ ТЕМПЕРАТУРЫ
-    if (digitalRead(BUTTON_UP) == LOW && (millis() - lastActivity > BUTTON_DEBOUNCE)) {
-      desiredTemp += TEMP_STEP;
-      if (desiredTemp > TEMP_MAX) desiredTemp = TEMP_MAX;
-      lastActivity = millis();
-      saveTemperatureToEEPROM();  // Сохраняем в EEPROM
-      Serial.print("Желаемая температура установлена: ");
-      Serial.print(desiredTemp);
-      Serial.println("°C");
-      updateDisplay();
-      delay(BUTTON_DEBOUNCE);
-    }
-    
-    // КНОПКА DOWN - УМЕНЬШЕНИЕ ТЕМПЕРАТУРЫ
-    if (digitalRead(BUTTON_DOWN) == LOW && (millis() - lastActivity > BUTTON_DEBOUNCE)) {
-      desiredTemp -= TEMP_STEP;
-      if (desiredTemp < TEMP_MIN) desiredTemp = TEMP_MIN;
-      lastActivity = millis();
-      saveTemperatureToEEPROM();  // Сохраняем в EEPROM
-      Serial.print("Желаемая температура установлена: ");
-      Serial.print(desiredTemp);
-      Serial.println("°C");
-      updateDisplay();
-      delay(BUTTON_DEBOUNCE);
-    }
+  // Сохраняем состояние кнопки
+  lastButtonState = buttonState;
+  
+  // Сброс счетчика кликов через 400 мс
+  if (buttonPowerClickCount > 0 && (currentTime - buttonPowerPressTime >= 400)) {
+    buttonPowerClickCount = 0;
   }
 }
 
-// =================== ФУНКЦИЯ: ОБРАБОТКА МНОГОКРАТНЫХ НАЖАТИЙ ===================
-void processButtonMultiClicks() {
-  Serial.print("Обработка многократных нажатий: ");
-  Serial.println(buttonPressCount);
+// =================== ОБРАБОТКА КНОПОК ТЕМПЕРАТУРЫ ===================
+void handleTemperatureButtons() {
+  unsigned long currentTime = millis();
+  static unsigned long lastButtonTime = 0;
   
-  // ТРОЙНОЕ НАЖАТИЕ - ВКЛ/ВЫКЛ НАГРЕВА
-  if (buttonPressCount == 3 && systemOn) {
-    heaterEnabled = !heaterEnabled;
-    lastActivity = millis();
-    
-    if (heaterEnabled) {
-      Serial.println("=== НАГРЕВ ВКЛЮЧЕН (тройное нажатие)! ===");
-      Serial.print("Будет работать до ");
-      Serial.print(MAX_TEMPERATURE);
-      Serial.println("°C");
-      lastPWMCycle = millis();
-      heaterPWMState = true;
-    } else {
-      Serial.println("=== НАГРЕВ ВЫКЛЮЧЕН (тройное нажатие) ===");
-      ledcWrite(HEATER_PIN, 0);
-    }
-    updateDisplay();
-  }
-  
-  // ДВОЙНОЕ НАЖАТИЕ - ВКЛ/ВЫКЛ ДИСПЛЕЯ
-  else if (buttonPressCount == 2 && systemOn) {
-    displayOn = !displayOn;
-    lastActivity = millis();
-    
-    if (displayOn) {
-      Serial.println("Дисплей включен (двойное нажатие)");
-      updateDisplay();
-    } else {
-      Serial.println("Дисплей выключен (двойное нажатие)");
-      u8g2.clearBuffer();
-      u8g2.sendBuffer();
-    }
-  }
-  
-  // Сброс счетчика
-  buttonPressCount = 0;
-}
-
-// =================== ФУНКЦИЯ: ОБНОВЛЕНИЕ СТАТУСА БАТАРЕИ ===================
-void updateBatteryStatus() {
-  // Усреднение 10 измерений для уменьшения шума
-  const int numSamples = 10;
-  long sum = 0;
-  
-  for (int i = 0; i < numSamples; i++) {
-    sum += analogRead(BATTERY_PIN);
-    delayMicroseconds(100);
-  }
-  
-  int rawValue = sum / numSamples;
-  
-  // Проверка на корректность ADC
-  if (rawValue < 10 || rawValue > 4095) {
-    Serial.println("ОШИБКА: Некорректное значение ADC!");
+  if (currentTime - lastButtonTime < BUTTON_DEBOUNCE) {
     return;
   }
   
-  float adcVoltage = (rawValue / ADC_MAX_VALUE) * ADC_REF_VOLTAGE;
+  bool tempChanged = false;
   
-  // Используем калибровочный коэффициент
-  batteryVoltage = adcVoltage * voltageDividerRatio;
-  
-  // Фильтрация скользящим средним
-  voltageBuffer[bufferIndex] = batteryVoltage;
-  bufferIndex = (bufferIndex + 1) % FILTER_SAMPLES;
-  
-  float sumFiltered = 0;
-  for (int i = 0; i < FILTER_SAMPLES; i++) {
-    sumFiltered += voltageBuffer[i];
+  if (digitalRead(BUTTON_UP) == LOW) {
+    lastButtonTime = currentTime;
+    lastActivity = currentTime;
+    
+    desiredTemp += TEMP_STEP;
+    if (desiredTemp > TEMP_MAX) desiredTemp = TEMP_MAX;
+    tempChanged = true;
   }
-  filteredVoltage = sumFiltered / FILTER_SAMPLES;
   
-  // Расчет процента заряда - ПАРАБОЛИЧЕСКИЙ МЕТОД
-  batteryPercentage = calculateBatteryPercentageNonlinear(filteredVoltage);
-  batteryPercentage = constrain(batteryPercentage, 0, 100);
+  if (digitalRead(BUTTON_DOWN) == LOW) {
+    lastButtonTime = currentTime;
+    lastActivity = currentTime;
+    
+    desiredTemp -= TEMP_STEP;
+    if (desiredTemp < TEMP_MIN) desiredTemp = TEMP_MIN;
+    tempChanged = true;
+  }
   
-  // Проверка уровней заряда для 3S Li-ion
-  lowBatteryWarning = (filteredVoltage <= BATTERY_VOLTAGE_LOW);
-  criticalBattery = (filteredVoltage <= BATTERY_VOLTAGE_CRITICAL);
-  
-  // Отладочный вывод каждые 10 секунд
-  static unsigned long lastDebug = 0;
-  if (millis() - lastDebug >= 10000) {
-    Serial.println("\n=== ИНФОРМАЦИЯ О БАТАРЕЕ ===");
-    Serial.print("ADC raw: ");
-    Serial.print(rawValue);
-    Serial.print(" (");
-    Serial.print((rawValue / ADC_MAX_VALUE) * 100, 1);
-    Serial.println("% от максимума)");
-    
-    Serial.print("ADC voltage: ");
-    Serial.print(adcVoltage, 3);
-    Serial.println("V");
-    
-    Serial.print("Батарея (фильтрованное): ");
-    Serial.print(filteredVoltage, 2);
-    Serial.print("V (");
-    Serial.print(batteryPercentage);
-    Serial.println("%)");
-    
-    Serial.print("Коэффициент делителя: ");
-    Serial.println(voltageDividerRatio, 2);
-    
-    // Проверка безопасности ADC
-    if (adcVoltage > 3.0) {
-      Serial.println("ВНИМАНИЕ: Напряжение на ADC > 3.0V! Проверьте делитель!");
+  if (tempChanged) {
+    if (heaterEnabled) {
+      targetTemp = desiredTemp;
+      overshootDetected = false;
+      heatingIntegral = 0.0;
+      prevTempError = 0.0;
+      wasHeating = false;
+      targetReachedDisplay = false;
+      Serial.print("Target changed to: ");
+      Serial.println(desiredTemp);
     }
     
-    Serial.println("=============================");
-    lastDebug = millis();
+    saveTemperatureToEEPROM();
+    displayOn = true; // Включаем дисплей при изменении температуры
+    updateDisplay();
+    delay(BUTTON_DEBOUNCE);
   }
 }
 
-// =================== ФУНКЦИЯ: ПАРАБОЛИЧЕСКИЙ РАСЧЕТ ПРОЦЕНТА ЗАРЯДА ===================
-int calculateBatteryPercentageNonlinear(float voltage) {
-  // Для 3S Li-ion (3 элемента по 3.0-4.2V = 9.0V-12.6V)
-  // Параболический расчет с учетом кривой разряда Li-ion
+void controlHeater() {
+  unsigned long currentTime = millis();
   
-  float v = voltage;
+  if (currentTime - lastHeatingUpdate < HEATING_UPDATE_INTERVAL) {
+    return;
+  }
+  lastHeatingUpdate = currentTime;
   
-  if (v >= 12.6) return 100;  // Полностью заряжена
-  if (v <= 9.0) return 0;     // Полностью разряжена
-  
-  // Параболические участки кривой разряда Li-ion
-  
-  // 1. Участок 12.6V - 12.0V (100%-80%) - Быстрый спад в начале
-  if (v >= 12.0) {
-    float x = (v - 12.0) / (12.6 - 12.0); // 0-1
-    // Парабола: y = 20*x^2 + 80
-    return (int)(20 * x * x + 80);
+  // Проверка безопасности
+  if (currentTemp >= MAX_TEMPERATURE) {
+    heaterEnabled = false;
+    ledcWrite(PWM_CHANNEL, 0);
+    heatingPower = 0;
+    lastHeatingPower = 0;
+    currentMode = MODE_IDLE;
+    Serial.print("SAFETY: Overheat at ");
+    Serial.print(currentTemp, 1);
+    Serial.println("°C");
+    return;
   }
   
-  // 2. Участок 12.0V - 11.4V (80%-40%) - Более линейный
-  if (v >= 11.4) {
-    float x = (v - 11.4) / (12.0 - 11.4); // 0-1
-    // Парабола: y = -20*x^2 + 60*x + 40
-    return (int)(-20 * x * x + 60 * x + 40);
+  // Проверка батареи
+  if (batteryPercentage <= 0 || batteryVoltage < MIN_VOLTAGE_FOR_HEATING) {
+    heaterEnabled = false;
+    ledcWrite(PWM_CHANNEL, 0);
+    heatingPower = 0;
+    lastHeatingPower = 0;
+    currentMode = MODE_IDLE;
+    Serial.println("Heater disabled: battery too low!");
+    return;
   }
   
-  // 3. Участок 11.4V - 10.5V (40%-10%) - Быстрый спад в конце
-  if (v >= 10.5) {
-    float x = (v - 10.5) / (11.4 - 10.5); // 0-1
-    // Парабола: y = 30*x^0.7 + 10
-    return (int)(30 * pow(x, 0.7) + 10);
+  // Расчет разницы температур
+  float tempDiff = targetTemp - currentTemp;
+  float absTempDiff = abs(tempDiff);
+  
+  // =================== АДАПТИВНАЯ ЛОГИКА УПРАВЛЕНИЯ ===================
+  // Чем больше разница - тем осторожнее нагреваем!
+  
+  // Адаптивная максимальная мощность
+  float adaptiveMaxPower = HEATER_POWER_MAX;
+  if (absTempDiff > 100.0f) {
+    adaptiveMaxPower = HEATER_POWER_MAX * 0.6f; // 40% меньше при +100°C
+  } else if (absTempDiff > 50.0f) {
+    adaptiveMaxPower = HEATER_POWER_MAX * 0.7f; // 30% меньше при +50°C
+  } else if (absTempDiff > 20.0f) {
+    adaptiveMaxPower = HEATER_POWER_MAX * 0.8f; // 20% меньше при +20°C
   }
   
-  // 4. Участок 10.5V - 9.0V (10%-0%) - Очень быстрый спад
-  float x = (v - 9.0) / (10.5 - 9.0); // 0-1
-  // Квадратный корень для резкого спада
-  return (int)(10 * sqrt(x));
+  // Адаптивная скорость изменения мощности
+  float adaptiveMaxChange = 1.0f;
+  if (absTempDiff > 50.0f) {
+    adaptiveMaxChange = 0.7f; // Медленнее при больших скачках
+  }
+  
+  float newPower = 0.0;
+  
+  switch (currentMode) {
+    case MODE_MAINTAIN:
+      // РЕЖИМ ПОДДЕРЖАНИЯ (=)
+      if (currentTemp < targetTemp - 1.0) {
+        newPower = HEATER_POWER_MAINTAIN;
+      } else if (currentTemp > targetTemp + 0.5) {
+        newPower = 0;
+      } else {
+        newPower = HEATER_POWER_MAINTAIN / 3;
+      }
+      break;
+      
+    case MODE_HEATING:
+      // РЕЖИМ НАГРЕВА (🔥) - АДАПТИВНЫЙ
+      if (tempDiff > 100.0f) {
+        newPower = 25.0f;
+      } 
+      else if (tempDiff > 50.0f) {
+        newPower = 30.0f;
+      }
+      else if (tempDiff > 20.0f) {
+        newPower = 35.0f;
+      }
+      else if (tempDiff > 10.0f) {
+        newPower = 25.0f;
+      }
+      else if (tempDiff > 5.0f) {
+        newPower = 15.0f;
+      }
+      else if (tempDiff > 2.0f) {
+        newPower = 8.0f;
+      }
+      else {
+        newPower = HEATER_POWER_MIN;
+      }
+      
+      // Сильное снижение мощности при приближении к цели
+      if (tempDiff < 20.0f) {
+        float factor = tempDiff / 20.0f;
+        newPower = newPower * factor * 0.8f; // Дополнительное снижение
+        if (newPower < HEATER_POWER_MIN) {
+          newPower = HEATER_POWER_MIN;
+        }
+      }
+      
+      // Ограничение адаптивной мощностью
+      if (newPower > adaptiveMaxPower) {
+        newPower = adaptiveMaxPower;
+      }
+      break;
+      
+    case MODE_COOLING:
+      // РЕЖИМ ОХЛАЖДЕНИЯ (❄️)
+      newPower = 0;
+      break;
+      
+    case MODE_IDLE:
+    default:
+      newPower = 0;
+      break;
+  }
+  
+  // Плавное изменение мощности с адаптивной скоростью
+  float powerChange = newPower - lastHeatingPower;
+  
+  if (abs(powerChange) > adaptiveMaxChange) {
+    if (powerChange > 0) {
+      lastHeatingPower += adaptiveMaxChange;
+    } else {
+      lastHeatingPower -= adaptiveMaxChange;
+    }
+  } else {
+    lastHeatingPower = newPower;
+  }
+  
+  lastHeatingPower = constrain(lastHeatingPower, 0, adaptiveMaxPower);
+  
+  // Применение ШИМ
+  int pwmValue = map(lastHeatingPower, 0, 100, 0, 255);
+  pwmValue = constrain(pwmValue, 0, 255);
+  ledcWrite(PWM_CHANNEL, pwmValue);
+  heatingPower = lastHeatingPower;
+  
+  // Отладочный вывод
+  static unsigned long lastDebug = 0;
+  if (currentTime - lastDebug > 2000) {
+    const char* modeStr = "";
+    switch (currentMode) {
+      case MODE_HEATING: modeStr = "HEATING"; break;
+      case MODE_COOLING: modeStr = "COOLING"; break;
+      case MODE_MAINTAIN: modeStr = "MAINTAIN"; break;
+      default: modeStr = "IDLE"; break;
+    }
+    
+    Serial.print("Mode: ");
+    Serial.print(modeStr);
+    Serial.print(", Temp: ");
+    Serial.print(currentTemp, 1);
+    Serial.print("°C / ");
+    Serial.print(targetTemp);
+    Serial.print("°C, Diff: ");
+    Serial.print(tempDiff, 1);
+    Serial.print("°C, Power: ");
+    Serial.print(heatingPower, 1);
+    Serial.print("%, AdaptiveMax: ");
+    Serial.print(adaptiveMaxPower, 0);
+    Serial.print("%, ChangeRate: ");
+    Serial.print(adaptiveMaxChange, 1);
+    Serial.print("%/step");
+    Serial.println();
+    lastDebug = currentTime;
+  }
 }
 
-// =================== ФУНКЦИЯ: ТАБЛИЧНЫЙ РАСЧЕТ ПРОЦЕНТА ЗАРЯДА ===================
-int calculateBatteryPercentage(float voltage) {
-  // Используем параболический расчет
-  return calculateBatteryPercentageNonlinear(voltage);
+// =================== ОБНОВЛЕНИЕ ТЕМПЕРАТУРЫ ===================
+Filter your search...
+Type:
+
+All
+
+
+
+
+
+void updateTemperature() {
+  float newTemp = thermocouple.readCelsius();
+  
+  if (isnan(newTemp) || newTemp < -50 || newTemp > 1000) {
+    return;
+  }
+  
+  // Медианный фильтр
+  tempHistory[tempHistoryIndex] = newTemp;
+  tempHistoryIndex = (tempHistoryIndex + 1) % 5;
+  
+  float tempArray[5];
+  for (int i = 0; i < 5; i++) {
+    tempArray[i] = tempHistory[i];
+  }
+  
+  // Сортировка для медианы
+  for (int i = 0; i < 4; i++) {
+    for (int j = i + 1; j < 5; j++) {
+      if (tempArray[j] < tempArray[i]) {
+        float temp = tempArray[i];
+        tempArray[i] = tempArray[j];
+        tempArray[j] = temp;
+      }
+    }
+  }
+  
+  float medianTemp = tempArray[2];
+  
+  // Экспоненциальное сглаживание (более быстрое реагирование)
+  float alpha = 0.7;
+  currentTemp = currentTemp * alpha + medianTemp * (1.0 - alpha);
 }
 
-// =================== ФУНКЦИЯ: ОБНОВЛЕНИЕ ДИСПЛЕЯ ===================
 void updateDisplay() {
   if (!displayOn) return;
   
@@ -779,222 +702,61 @@ void updateDisplay() {
   u8g2.drawBox(0, 0, 128, 64);
   u8g2.setDrawColor(1);
   
-  // СТАТУС СИСТЕМЫ (верхний левый угол)
-  u8g2.setFont(u8g2_font_micro_tr);
-  if (!systemOn) {
-    u8g2.drawStr(5, 7, "OFF");
-  } else if (heaterEnabled) {
-    u8g2.drawStr(5, 7, "HEATING");
-  } else {
-    u8g2.drawStr(5, 7, "STANDBY");
-  }
-  
-  // ТЕКУЩАЯ ТЕМПЕРАТУРА (левая часть)
-  u8g2.setFont(u8g2_font_logisoso28_tn);
-  char tempDisplay[6];
-  sprintf(tempDisplay, "%d", (int)currentTemp);
-  int tempWidth = u8g2.getStrWidth(tempDisplay);
-  int tempX = (128 - tempWidth) / 2 - 20;
+  // ПРОСТОЙ РЕЖИМ - только большая температура
+  u8g2.setFont(u8g2_font_logisoso38_tn);
+  char tempStr[6];
+  sprintf(tempStr, "%d", (int)currentTemp);
+  int tempWidth = u8g2.getStrWidth(tempStr);
+  int tempX = (128 - tempWidth) / 2;
   int tempY = 45;
-  u8g2.drawStr(tempX, tempY, tempDisplay);
+  u8g2.drawStr(tempX, tempY, tempStr);
   
-  // СИМВОЛ ГРАДУСА ДЛЯ ТЕКУЩЕЙ ТЕМПЕРАТУРЫ
-  drawTinyDegree(tempX + tempWidth + 3, tempY - 28);
+  u8g2.setFont(u8g2_font_6x10_tr);
+  u8g2.drawStr(tempX + tempWidth + 5, 30, "o");
+  u8g2.drawStr(tempX + tempWidth + 11, 30, "C");
   
-  // ИКОНКА НАГРЕВА (если включен) - С МИГАНИЕМ
+  // СИМВОЛ РЕЖИМА - показываем ТОЛЬКО когда нагрев ВКЛЮЧЕН
   int symbolX = tempX + tempWidth + 15;
-  if (systemOn && heaterEnabled) {
-    // Делаем огонек мигающим
-    static bool blinkState = false;
-    static unsigned long lastBlink = 0;
-    
-    if (millis() - lastBlink > 500) {  // Мигаем каждые 500 мс
-      blinkState = !blinkState;
-      lastBlink = millis();
-    }
-    
-    if (blinkState) {
-      drawHeatingSymbol(symbolX, tempY + 10);
+  if (heaterEnabled) {
+    switch (currentMode) {
+      case MODE_HEATING:
+        drawHeatingSymbol(symbolX, tempY + 10);  // 🔥
+        break;
+      case MODE_COOLING:
+        drawCoolingSymbol(symbolX, tempY + 10);  // ❄️
+        break;
+      case MODE_MAINTAIN:
+        drawMaintainSymbol(symbolX, tempY + 10); // =
+        break;
+      default:
+        drawCoolingSymbol(symbolX, tempY + 10);  // ❄️ по умолчанию
+        break;
     }
   }
-  
-  // СТРЕЛКА ОТ ТЕКУЩЕЙ К ЖЕЛАЕМОЙ ТЕМПЕРАТУРЕ
-  int arrowStartX = tempX + tempWidth + 10;
-  int arrowEndX = 85;
-  int arrowY = tempY - 10;
-  u8g2.drawLine(arrowStartX, arrowY, arrowEndX, arrowY);
-  u8g2.drawLine(arrowEndX, arrowY, arrowEndX - 3, arrowY - 2);
-  u8g2.drawLine(arrowEndX, arrowY, arrowEndX - 3, arrowY + 2);
-  
-  // ЖЕЛАЕМАЯ ТЕМПЕРАТУРА (правая часть)
-  u8g2.setFont(u8g2_font_logisoso18_tn);
-  char targetDisplay[5];
-  sprintf(targetDisplay, "%d", (int)desiredTemp);
-  int targetWidth = u8g2.getStrWidth(targetDisplay);
-  int targetX = 95;
-  int targetY = tempY;
-  u8g2.drawStr(targetX, targetY, targetDisplay);
-  
-  // СИМВОЛ ГРАДУСА ДЛЯ ЖЕЛАЕМОЙ ТЕМПЕРАТУРЫ
-  drawTinyDegree(targetX + targetWidth + 3, targetY - 20);
-  
-  // ИНДИКАТОР БАТАРЕИ (правый верхний угол)
-  drawBatteryIndicator(105, 3, batteryPercentage);
-  
-  // ПРОЦЕНТ ЗАРЯДА БАТАРЕИ
-  u8g2.setFont(u8g2_font_helvB08_tr);
-  char batStr[6];
-  sprintf(batStr, "%d%%", batteryPercentage);
-  int batWidth = u8g2.getStrWidth(batStr);
-  int batX = 105 - batWidth - 5;
-  u8g2.drawStr(batX, 12, batStr);
-  
-  // ВОСКЛИЦАТЕЛЬНЫЙ ЗНАК ПРИ НИЗКОМ ЗАРЯДЕ (25% и ниже)
-  if (lowBatteryWarning) {
-    u8g2.drawStr(batX - 15, 12, "!");
-  }
-  
-  // НИЖНИЙ РЕГИСТР (информация)
-  u8g2.setFont(u8g2_font_micro_tr);
-  u8g2.drawStr(5, 62, "CELSING");   // Логотип слева снизу
-  u8g2.drawStr(115, 22, "SET");     // Надпись "SET" справа сверху
-  
-  // Информация о батарее внизу (дополнительно)
-  char voltStr[10];
-  sprintf(voltStr, "%.1fV", filteredVoltage);
-  u8g2.drawStr(80, 62, voltStr);
+  // Если нагрев выключен - не показываем символ
   
   u8g2.sendBuffer();
 }
 
-// =================== ФУНКЦИЯ: ИНДИКАТОР БАТАРЕИ ===================
-void drawBatteryIndicator(int x, int y, int percentage) {
-  // Контур батареи
-  u8g2.drawFrame(x, y, 20, 10);
-  u8g2.drawBox(x + 20, y + 3, 2, 4);
-  
-  // Уровень заряда
-  int fillWidth = map(percentage, 0, 100, 0, 18);
-  fillWidth = constrain(fillWidth, 0, 18);
-  
-  // Цвет в зависимости от уровня заряда
-  if (percentage > 50) {
-    u8g2.setDrawColor(1);  // Нормальный заряд
-  } else if (percentage > 25) {
-    u8g2.setDrawColor(1);  // Средний заряд
-  } else {
-    u8g2.setDrawColor(1);  // Низкий заряд
-  }
-  
-  u8g2.drawBox(x + 1, y + 1, fillWidth, 8);
-  u8g2.setDrawColor(1);  // Возвращаем белый цвет
+// =================== ДОПОЛНИТЕЛЬНЫЕ ФУНКЦИИ ===================
+
+void drawDegree(int x, int y) {
+  u8g2.drawPixel(x+1, y);
+  u8g2.drawPixel(x+2, y);
+  u8g2.drawPixel(x+3, y);
+  u8g2.drawPixel(x+1, y+4);
+  u8g2.drawPixel(x+2, y+4);
+  u8g2.drawPixel(x+3, y+4);
+  u8g2.drawPixel(x, y+1);
+  u8g2.drawPixel(x, y+2);
+  u8g2.drawPixel(x, y+3);
+  u8g2.drawPixel(x+4, y+1);
+  u8g2.drawPixel(x+4, y+2);
+  u8g2.drawPixel(x+4, y+3);
 }
 
-// =================== ФУНКЦИЯ: БЕЗОПАСНОСТЬ ===================
-void safetyCheck() {
-  // ПРОВЕРКА ПРЕВЫШЕНИЯ ТЕМПЕРАТУРЫ
-  if (currentTemp > MAX_TEMPERATURE + 2.0) {
-    heaterEnabled = false;
-    ledcWrite(HEATER_PIN, 0);
-    Serial.println("БЕЗОПАСНОСТЬ: Критическое превышение температуры!");
-    updateDisplay();
-  }
-  
-  // АВАРИЙНОЕ ОТКЛЮЧЕНИЕ ПРИ КРИТИЧЕСКОМ УРОВНЕ БАТАРЕИ
-  if (criticalBattery && systemOn) {
-    heaterEnabled = false;
-    systemOn = false;
-    ledcWrite(HEATER_PIN, 0);
-    Serial.println("ЭКСТРЕННОЕ ОТКЛЮЧЕНИЕ: Критический уровень батареи!");
-    updateDisplay();
-  }
-  
-  // ПРОВЕРКА БЕЗОПАСНОСТИ ДЕЛИТЕЛЯ НАПРЯЖЕНИЯ
-  static unsigned long lastSafetyCheck = 0;
-  if (millis() - lastSafetyCheck >= 10000) {
-    int raw = analogRead(BATTERY_PIN);
-    float adcV = (raw / ADC_MAX_VALUE) * ADC_REF_VOLTAGE;
-    
-    if (adcV > 3.3) {
-      Serial.println("КРИТИЧЕСКАЯ ОШИБКА: Напряжение на ADC > 3.3V! Отключите питание!");
-      // Аварийное отключение всего
-      heaterEnabled = false;
-      systemOn = false;
-      ledcWrite(HEATER_PIN, 0);
-    }
-    
-    lastSafetyCheck = millis();
-  }
-}
-
-// =================== ФУНКЦИЯ: ПРЕДУПРЕЖДЕНИЕ О НИЗКОМ ЗАРЯДЕ ===================
-void displayLowBatteryWarning() {
-  if (!displayOn) {
-    displayOn = true;
-    lastActivity = millis();
-  }
-  
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_helvB12_tr);
-  u8g2.drawStr(10, 25, "LOW BATTERY!");
-  u8g2.setFont(u8g2_font_helvB08_tr);
-  u8g2.drawStr(15, 45, "Charge: ");
-  u8g2.setCursor(70, 45);
-  u8g2.print(batteryPercentage);
-  u8g2.print("%");
-  
-  // Показываем напряжение
-  u8g2.setCursor(15, 55);
-  u8g2.print(filteredVoltage, 1);
-  u8g2.print("V");
-  
-  u8g2.drawStr(25, 60, "10 min reminder");
-  u8g2.sendBuffer();
-  
-  Serial.print("ПРЕДУПРЕЖДЕНИЕ: Низкий заряд батареи! ");
-  Serial.print(batteryPercentage);
-  Serial.print("%, ");
-  Serial.print(filteredVoltage, 1);
-  Serial.println("V");
-  
-  delay(3000);  // Показываем предупреждение 3 секунды
-  
-  if (systemOn) {
-    updateDisplay();
-  }
-}
-
-// =================== ФУНКЦИЯ: СОХРАНЕНИЕ ТЕМПЕРАТУРЫ В EEPROM ===================
-void saveTemperatureToEEPROM() {
-  EEPROM.write(0, (byte)desiredTemp);
-  EEPROM.commit();
-  Serial.println("Температура сохранена в EEPROM");
-}
-
-// =================== ФУНКЦИЯ: ЗАГРУЗКА ТЕМПЕРАТУРЫ ИЗ EEPROM ===================
-void loadSavedTemperature() {
-  byte savedTemp = EEPROM.read(0);
-  if (savedTemp >= TEMP_MIN && savedTemp <= TEMP_MAX) {
-    desiredTemp = savedTemp;
-    Serial.print("Загружена сохраненная температура: ");
-    Serial.print(desiredTemp);
-    Serial.println("°C");
-  }
-}
-
-// =================== ФУНКЦИЯ: ОШИБКА ТЕРМОПАРЫ ===================
-void displayErrorMessage(const char* message) {
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_helvB12_tr);
-  u8g2.drawStr(20, 30, message);
-  u8g2.sendBuffer();
-  delay(2000);
-}
-
-// =================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ ОТРИСОВКИ ===================
-
-// РИСОВАНИЕ СИМВОЛА НАГРЕВА (ОГОНЬКА)
 void drawHeatingSymbol(int x, int y) {
+  // Символ пламени (🔥)
   u8g2.drawLine(x + 4, y, x + 2, y + 2);
   u8g2.drawLine(x + 2, y + 2, x + 1, y + 5);
   u8g2.drawLine(x + 1, y + 5, x + 2, y + 8);
@@ -1010,22 +772,114 @@ void drawHeatingSymbol(int x, int y) {
   u8g2.drawPixel(x + 4, y - 1);
 }
 
-// РИСОВАНИЕ МАЛЕНЬКОГО СИМВОЛА ГРАДУСА
-void drawTinyDegree(int x, int y) {
-  u8g2.drawPixel(x+1, y);
-  u8g2.drawPixel(x+2, y);
-  u8g2.drawPixel(x+3, y);
-  u8g2.drawPixel(x+1, y+4);
-  u8g2.drawPixel(x+2, y+4);
-  u8g2.drawPixel(x+3, y+4);
-  u8g2.drawPixel(x, y+1);
-  u8g2.drawPixel(x, y+2);
-  u8g2.drawPixel(x, y+3);
-  u8g2.drawPixel(x+4, y+1);
-  u8g2.drawPixel(x+4, y+2);
-  u8g2.drawPixel(x+4, y+3);
-  u8g2.drawPixel(x+1, y+1);
-  u8g2.drawPixel(x+3, y+1);
-  u8g2.drawPixel(x+1, y+3);
-  u8g2.drawPixel(x+3, y+3);
+void drawMaintainSymbol(int x, int y) {
+  // Символ "=" (поддержание)
+  u8g2.drawLine(x, y + 2, x + 8, y + 2);
+  u8g2.drawLine(x, y + 6, x + 8, y + 6);
+}
+
+void drawCoolingSymbol(int x, int y) {
+  // Символ снежинки (❄️)
+  u8g2.drawLine(x, y - 4, x, y + 4);
+  u8g2.drawLine(x - 4, y, x + 4, y);
+  u8g2.drawLine(x - 3, y - 3, x + 3, y + 3);
+  u8g2.drawLine(x - 3, y + 3, x + 3, y - 3);
+  u8g2.drawPixel(x, y);
+}
+
+void drawBatteryIndicator(int x, int y, int percentage) {
+  u8g2.drawFrame(x, y, 20, 10);
+  u8g2.drawBox(x + 20, y + 3, 2, 4);
+  
+  int fillWidth = map(percentage, 0, 100, 0, 18);
+  fillWidth = constrain(fillWidth, 0, 18);
+  
+  u8g2.drawBox(x + 1, y + 1, fillWidth, 8);
+}
+
+void updateBatteryStatus() {
+  const int numSamples = 10;
+  long sum = 0;
+  
+  for (int i = 0; i < numSamples; i++) {
+    sum += analogRead(BATTERY_PIN);
+    delayMicroseconds(100);
+  }
+  
+  int rawValue = sum / numSamples;
+  
+  if (rawValue < 10) return;
+  
+  float adcVoltage = (rawValue / ADC_MAX_VALUE) * ADC_REF_VOLTAGE;
+  batteryVoltage = adcVoltage * VOLTAGE_DIVIDER_COEFF;
+  
+  // Улучшенный расчет процентов с линейной интерполяцией
+  if (batteryVoltage >= BATTERY_FULL_VOLTAGE) {
+    batteryPercentage = 100;
+  } else if (batteryVoltage <= BATTERY_EMPTY_VOLTAGE) {
+    batteryPercentage = 0;
+  } else {
+    // Линейная интерполяция между пустым и полным
+    float voltageRange = BATTERY_FULL_VOLTAGE - BATTERY_EMPTY_VOLTAGE;
+    float voltageDiff = batteryVoltage - BATTERY_EMPTY_VOLTAGE;
+    batteryPercentage = (int)((voltageDiff / voltageRange) * 100.0f);
+  }
+  
+  // Отладочный вывод для калибровки
+  static unsigned long lastBatteryDebug = 0;
+  unsigned long currentTime = millis();
+  if (currentTime - lastBatteryDebug > 10000) {
+    Serial.print("Battery calibration - RAW ADC: ");
+    Serial.print(rawValue);
+    Serial.print(", ADC Voltage: ");
+    Serial.print(adcVoltage, 3);
+    Serial.print("V, Battery Voltage: ");
+    Serial.print(batteryVoltage, 3);
+    Serial.print("V, Percentage: ");
+    Serial.print(batteryPercentage);
+    Serial.println("%");
+    
+    // Подсказка для калибровки
+    Serial.println("=== CALIBRATION TIP ===");
+    Serial.println("If battery always shows 100%, try these VOLTAGE_DIVIDER_COEFF:");
+    Serial.println("- For 1:2 divider (4.2V->2.1V): 2.0");
+    Serial.println("- For 1:3 divider (4.2V->1.4V): 3.0");
+    Serial.print("Current coefficient: ");
+    Serial.println(VOLTAGE_DIVIDER_COEFF);
+    Serial.println("Measure actual battery voltage and adjust coefficient!");
+    
+    lastBatteryDebug = currentTime;
+  }
+}
+
+void safetyCheck() {
+  if (currentTemp >= MAX_TEMPERATURE && heaterEnabled) {
+    heaterEnabled = false;
+    ledcWrite(PWM_CHANNEL, 0);
+    currentMode = MODE_IDLE;
+  }
+}
+
+void saveTemperatureToEEPROM() {
+  int tempToSave = (int)desiredTemp;
+  if (tempToSave > 255) tempToSave = 255;
+  EEPROM.write(0, tempToSave);
+  EEPROM.commit();
+}
+
+void loadSavedTemperature() {
+  int savedValue = EEPROM.read(0);
+  if (savedValue >= TEMP_MIN && savedValue <= TEMP_MAX) {
+    desiredTemp = savedValue;
+  } else {
+    desiredTemp = DEFAULT_TEMP;
+  }
+}
+
+void displayErrorMessage(const char* message) {
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_helvB12_tr);
+  u8g2.drawStr(10, 30, message);
+  u8g2.sendBuffer();
+  delay(3000);
 }
